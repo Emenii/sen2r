@@ -83,6 +83,15 @@
 #'  from Python (leaving a standing process running).
 #' @param overwrite Logical value: should existing output L2A products be overwritten?
 #'  (default: FALSE)
+#' @param kill_errored Logical: experimental feature allowing killing dead Sen2Cor
+#'  processes, so leaving `sen2cor()` continuing processing on the remaining 
+#'  products. Set to TRUE to activate it (default is FALSE).
+#'  This experimental feature is available only on Unix systems,
+#'  and requires package "tools" to be installed.
+#'  This option is not compatible with `timeout` (in case both are set, 
+#'  `kill_errored` will be ignored).
+#' @param overwrite Logical value: should existing output L2A products be overwritten?
+#'  (default: FALSE)
 #' @param .log_message (optional) Internal parameter
 #'  (it is used when the function is called by `sen2r()`).
 #' @param .log_output (optional) Internal parameter
@@ -129,6 +138,7 @@ sen2cor <- function(
   tiles = NULL, 
   parallel = FALSE, 
   timeout = 0,
+  kill_errored = FALSE,
   overwrite = FALSE,
   .log_message = NA, 
   .log_output = NA
@@ -201,6 +211,30 @@ sen2cor <- function(
       "No valid L1C products were found,"
     )
     return(invisible(NULL))
+  }
+  
+  # Check kill_errored
+  if (all(kill_errored == TRUE, Sys.info()["sysname"] == "Windows")) {
+    print_message(
+      type = "warning",
+      "'kill_errored' is available only for Unix systems; skipping it."
+    )
+    kill_errored <- FALSE
+  }
+  if (all(kill_errored == TRUE, !requireNamespace("tools", quietly = TRUE))) {
+    print_message(
+      type = "warning",
+      "'kill_errored' can be used only if package \"tools\" is installed; ",
+      "skipping it."
+    )
+    kill_errored <- FALSE
+  }
+  if (all(kill_errored == TRUE, timeout > 0)) {
+    print_message(
+      type = "warning",
+      "'timeout' and 'kill_errored' conflict; 'kill_errored' will be ignored."
+    )
+    kill_errored <- FALSE
   }
   
   ## Cycle on each file
@@ -425,19 +459,84 @@ sen2cor <- function(
         sel_sen2cor_log_message <- if (!is.na(.log_message)) {
           tempfile(pattern = "sen2cor_log_message_", fileext = ".txt")
         } else {NA}
-        sys::exec_wait(
-          binpaths$sen2cor,
-          args = sen2cor_args,
-          std_out = sel_sen2cor_log_output,
-          std_err = sel_sen2cor_log_message,
-          timeout = timeout
-        )
+        if (kill_errored == TRUE) {
+          sel_sen2cor_pid_1 <- sys::exec_background(
+            binpaths$sen2cor,
+            args = sen2cor_args,
+            std_out = sel_sen2cor_log_output,
+            std_err = sel_sen2cor_log_message
+          )
+        } else {
+          sys::exec_wait(
+            binpaths$sen2cor,
+            args = sen2cor_args,
+            timeout = timeout,
+            std_out = sel_sen2cor_log_output,
+            std_err = sel_sen2cor_log_message
+          )
+        }
       } else {
-        system(
-          paste(binpaths$sen2cor, paste(sen2cor_args, collapse = " ")),
-          intern = Sys.info()["sysname"] == "Windows",
-          timeout = timeout
-        )
+        if (kill_errored == TRUE) {
+          system(
+            paste(binpaths$sen2cor, paste(sen2cor_args, collapse = " ")),
+            intern = FALSE,
+            wait = FALSE
+          )
+        } else {
+          system(
+            paste(binpaths$sen2cor, paste(sen2cor_args, collapse = " ")),
+            intern = Sys.info()["sysname"] == "Windows",
+            timeout = timeout
+          )
+        }
+      }
+      
+      if (kill_errored == TRUE) {
+        Sys.sleep(10) # wait until all processes started
+        # Retrieve the correct PID
+        # (sel_sen2cor_pid_1 is the PID of L2A_Process bash script,
+        # while we need the PID of the second launched python utility)
+        psaux_raw0 <- system(paste0("ps aux"), intern = TRUE)
+        psaux_raw1 <- psaux_raw0[grepl(sel_l1c, psaux_raw0)]
+        psaux_raw2 <- strsplit(psaux_raw1, " +")
+        sel_sen2cor_pids <- sapply(psaux_raw2, function(x){x[[2]]})
+        sel_sen2cor_pid_2 <- if (length(sel_sen2cor_pids) > 0) {
+          psaux_raw2[[which(sel_sen2cor_pids==max(sel_sen2cor_pids))]][2]
+        } else {
+          1E9 # dummy nonexistent PID 
+        }
+        # check every 10 seconds
+        while (tools::pskill(sel_sen2cor_pid_2, 0)) {
+          # check sel_sen2cor_pid_2 to be running (CPU > 0)
+          sel_sen2cor_cpu <- 0
+          n_check_cpu <- 0
+          while (sel_sen2cor_cpu == 0) {
+            if (n_check_cpu <= 5) { # maximum 5 consecutive checks
+              Sys.sleep(10)
+              n_check_cpu <- n_check_cpu + 1
+              psaux_raw3 <- system(paste0("ps aux"), intern = TRUE)
+              psaux_raw4 <- psaux_raw3[grepl(sel_l1c, psaux_raw3)]
+              psaux_raw5 <- strsplit(psaux_raw4, " +")
+              sel_sen2cor_cpu <- if (length(psaux_raw5) > 0) {
+                as.integer(psaux_raw5[[
+                  which(sapply(psaux_raw5, function(x){x[2]==sel_sen2cor_pid_2}))
+                  ]][3])
+              } else {
+                0
+              }
+            } else {
+              sen2r:::print_message(
+                type = "message", date = TRUE,
+                "Sen2Cor on ", basename(sel_l1c)," was killed after ",
+                format(Sys.time() - sel_sen2cor_timestart, digits = 3)," ",
+                "because inactive."
+              )
+              tools::pskill(sel_sen2cor_pids)
+              sel_sen2cor_cpu <- 1E6 # to exit from WHILE cycle
+            }
+          }
+        }
+        tools::pskill(sel_sen2cor_pids)
       }
       
       print_message(
