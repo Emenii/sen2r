@@ -476,6 +476,26 @@ create_indices_db <- function(xslt_path = NA,
       s2_formula_mathml = "<math xmlns=\"http://www.w3.org/1998/Math/MathML\">\n <mrow>\n  <mfrac>\n   <mrow>\n    <mrow>\n     <mrow>\n      <mi mathcolor=\"#443399\">SWIR1</mi>\n      <mo>-</mo>\n      <mi mathcolor=\"#443399\">NIR</mi>\n     </mrow>\n    </mrow>\n   </mrow>\n   <mrow>\n    <mrow>\n     <mrow>\n      <mi mathcolor=\"#443399\">SWIR1</mi>\n      <mo>+</mo>\n      <mi mathcolor=\"#443399\">NIR</mi>\n     </mrow>\n    </mrow>\n   </mrow>\n  </mfrac>\n </mrow>\n</math>",
       checked = TRUE,
       a = NA, b = NA, x = NA
+    ),
+    "TI-100" = data.frame(
+      n_index = 323,
+      longname = "Turbidity Index / 100",
+      name = "TI-100",
+      link = "https://workshop.copernicus.eu/sites/default/files/content/attachments/ajax/mapping_of_coastal_water_quality.pdf#page=35",
+      s2_formula = "(1030*power(band_4,1.08)/7+0.5)/100",
+      s2_formula_mathml = NA,
+      checked = FALSE,
+      a = NA, b = NA, x = NA
+    ),
+    "CCI" = data.frame(
+      n_index = 324,
+      longname = "Chlorophyll Concentration Index",
+      name = "CCI",
+      link = "https://workshop.copernicus.eu/sites/default/files/content/attachments/ajax/mapping_of_coastal_water_quality.pdf#page=39",
+      s2_formula = "exp(-0.335+0.01663*(log(band_2/band_4)))",
+      s2_formula_mathml = NA,
+      checked = FALSE,
+      a = NA, b = NA, x = NA
     )
   ), fill=TRUE)
   
